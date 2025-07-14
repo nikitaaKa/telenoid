@@ -54,7 +54,7 @@ function create() {
     ball.body.setMaxVelocity(600, 600);
 
     // Загрузка уровня
-    loadLevel(65);
+    loadLevel(gameState.level);
 
     // Управление
     gameScene.input.on('pointermove', pointer => {
@@ -118,7 +118,7 @@ function generateLevel(level) {
                 } else if (level > 1 && random < 0.40) {
                     blockType = 2; // 2 = Прочный (20% шанс)
                 } else {
-                    blockType = 3; // 1 = Обычный
+                    blockType = 1; // 1 = Обычный
                 }
             }
 
