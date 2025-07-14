@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+    <title>Telegram Arkanoid</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #000;
+            overflow: hidden;
+        }
+        /* Этот контейнер важен для правильного центрирования и масштабирования */
+        #game-container {
+            width: 100vw;
+            height: 100vh;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <!-- Вот этот div ОБЯЗАТЕЛЕН -->
+    <div id="game-container"></div>
+
+    <script src="phaser.min.js"></script>
+    <script src="game.js"></script>
+</body>
+</html>
