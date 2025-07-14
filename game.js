@@ -45,7 +45,7 @@ function create() {
     // Игровые объекты
     bricks = gameScene.physics.add.staticGroup();
 
-    paddle = gameScene.physics.add.sprite(gameScene.cameras.main.centerX, GAME_HEIGHT - 60, 'pixel')
+    paddle = gameScene.physics.add.sprite(gameScene.cameras.main.centerX, GAME_HEIGHT - 90, 'pixel')
         .setDisplaySize(100, 20).setTint(0xffffff).setImmovable(true);
     paddle.setCollideWorldBounds(true);
 
@@ -338,7 +338,7 @@ function winLevel() {
 
 function resetPaddleAndBall() {
     gameStarted = false;
-    paddle.setPosition(gameScene.cameras.main.centerX, GAME_HEIGHT - 60);
+    paddle.setPosition(gameScene.cameras.main.centerX, GAME_HEIGHT - 90);
     ball.body.setVelocity(0, 0);
 }
 
