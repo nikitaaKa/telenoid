@@ -287,7 +287,7 @@ function generateLevel(level) {
                 else if (level > 4 && random < 0.15) { blockType = 3; }
                 else if (level > 3 && random < 0.20) { blockType = 9; }
                 else if (level > 1 && random < 0.40) { blockType = 2; }
-                else { blockType = 3; }
+                else { blockType = 1; }
             }
 
             if (blockType >= 1 && blockType <= 5) { hasDestroyableBrick = true; }
