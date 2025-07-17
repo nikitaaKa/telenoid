@@ -16,15 +16,19 @@ const BRICK_AREA_HEIGHT_RATIO = 0.2;
 const gameState = { score: 0, level: 1, lives: 3 };
 let paddle, ball, bricks;
 let scoreText, levelText, livesText;
-let gameStarted = false;
+let isGameplayActive = false;
 let destroyableBricksCount = 0;
 let gameScene;
 let stars;
 let emitters = {};
-let ballTrail;
+let bonusEmitters = {};
 let bonuses; // НОВАЯ переменная для группы бонусов
-let activeBonus = null; // Хранит активный бонус (например, 'laser')
-let lasers; // НОВАЯ переменная для группы лазеров
+let activeBonus = null; // Хранит активный бонус (например, 'L')
+let enemies;
+let littleBalls;
+let aimLine; // Линия прицеливания
+let laserBeam; // Боевой лазер
+let laserTimer; // Таймер для лазера
 
 // 2. Все функции игры
 
@@ -34,6 +38,25 @@ function preload() {
     graphicsRect.fillRect(0, 0, 1, 1);
     graphicsRect.generateTexture('pixel', 1, 1);
     graphicsRect.destroy();
+
+    const triangle = this.add.graphics();
+    triangle.fillStyle(0xff0000); // Красный цвет
+    triangle.lineStyle(2, 0xffffff, 1); // Белая обводка
+    triangle.beginPath();
+    triangle.moveTo(25, 0);  // Верхняя точка
+    triangle.lineTo(50, 50); // Правая нижняя
+    triangle.lineTo(0, 50);  // Левая нижняя
+    triangle.closePath();
+    triangle.fillPath();
+    triangle.strokePath();
+    triangle.generateTexture('enemy_triangle', 50, 50);
+    triangle.destroy();
+
+    const littleBallGraphics = this.add.graphics();
+    littleBallGraphics.fillStyle(0xcccccc); // Светло-серый цвет
+    littleBallGraphics.fillCircle(5, 5, 5); // Диаметр 10, радиус 5
+    littleBallGraphics.generateTexture('littleBallTexture', 10, 10);
+    littleBallGraphics.destroy();
 }
 
 function create() {
@@ -53,10 +76,8 @@ function create() {
     bricks = gameScene.physics.add.staticGroup();
 
     bonuses = gameScene.physics.add.group();
-    lasers = gameScene.physics.add.group({
-        defaultKey: 'pixel',
-        maxSize: 10 // Ограничим количество лазеров на экране
-    });
+    enemies = gameScene.physics.add.group();
+    littleBalls = gameScene.physics.add.group();
 
     const paddleHeight = height * PADDLE_HEIGHT_RATIO;
     const paddleWidth = paddleHeight * PADDLE_ASPECT_RATIO;
@@ -89,7 +110,6 @@ function create() {
     // Создаем эмиттер для каждого цвета
     for (const colorName in blockColors) {
         const color = blockColors[colorName];
-
         const particles = gameScene.add.particles(0, 0, 'pixel', {
             speed: { min: -200, max: 200 },
             angle: { min: 0, max: 360 },
@@ -105,63 +125,59 @@ function create() {
         emitters[colorName] = particles;
     }
 
-    // Трейл мяча
-    ballTrail = gameScene.add.particles(0, 0, 'pixel', {
-        speed: 10, // Небольшая скорость, чтобы частицы "отставали"
-        scale: { start: 10, end: 0 },
-        alpha: { start: 1, end: 0 },
-        lifespan: 250,
-        blendMode: 'ADD', // Режим смешивания для красивого свечения
+    const bonusColors = {
+        'E': 0x2ecc71, 'S': 0x3498db, 'C': 0xf1c40f,
+        'L': 0xe74c3c, 'R': 0x9b59b6
+    };
 
-        // ВАЖНО: Привязываем эмиттер к мячу СРАЗУ
-        follow: ball,
+    for (const type in bonusColors) {
+        const color = bonusColors[type];
+        const particles = gameScene.add.particles(0, 0, 'pixel', {
+            speed: 0,
+            scale: { start: 1, end: 0 },
+            alpha: { start: 0.4, end: 0 },
+            lifespan: 200,
+            blendMode: 'ADD',
+            tint: color, // Сразу задаем цвет
+            emitting: false
+        });
+        bonusEmitters[type] = particles; // Сохраняем менеджер частиц по ключу-букве
+    }
 
-        followOffset: {
-            x: 0,
-            y: 0
-        }
-    });
-
-    ballTrail.stop();
-
+    resetBonusEffects();
     loadLevel(gameState.level);
 
     gameScene.input.on('pointermove', pointer => {
         paddle.x = Phaser.Math.Clamp(pointer.x, paddle.displayWidth / 2, width - paddle.displayWidth / 2);
     });
     gameScene.input.on('pointerdown', () => {
-        // --- ОТЛАДКА ---
-        console.log(`КЛИК! activeBonus = "${activeBonus}", isStuck = ${ball.getData('isStuck')}, gameStarted = ${gameStarted}`);
-
-        if (activeBonus === 'L') {
-            // --- ОТЛАДКА ---
-            console.log(`%cЛАЗЕР: Условие для стрельбы выполнено.`, 'background: #ff0000; color: #fff;');
-            fireLaser();
-            return;
-        }
-
         if (ball.getData('isStuck')) {
-            // --- ОТЛАДКА ---
-            console.log(`%cОТКЛЕИВАНИЕ: Условие для отклеивания выполнено.`, 'background: #ffdd00; color: #000;');
             ball.setData('isStuck', false);
+            resetBonusEffects();
             ball.body.setBounce(1);
             ball.body.setVelocity(Phaser.Math.Between(-gameScene.cameras.main.width * 0.4, gameScene.cameras.main.width * 0.4), -gameScene.cameras.main.height * 0.8);
-            return;
         }
 
-        if (!gameStarted) {
-            // --- ОТЛАДКА ---
-            console.log(`СТАРТ ИГРЫ: Запускаем мяч.`);
-            gameStarted = true;
+        if (!isGameplayActive) {
+            isGameplayActive = true;
             ball.body.setVelocity(Phaser.Math.Between(-gameScene.cameras.main.width * 0.4, gameScene.cameras.main.width * 0.4), -gameScene.cameras.main.height * 0.8);
-            ballTrail.start()
         }
     });
 
     gameScene.physics.add.collider(ball, paddle, hitPaddle);
     gameScene.physics.add.collider(ball, bricks, hitBrick);
-    gameScene.physics.add.collider(lasers, bricks, hitBrickWithLaser);
     gameScene.physics.add.overlap(paddle, bonuses, collectBonus);
+    gameScene.physics.add.collider(littleBalls, bricks, hitBrickWithLittleBall);
+    gameScene.physics.add.collider(littleBalls, paddle);
+
+    gameScene.time.addEvent({
+        delay: 15000,
+        callback: spawnEnemy,
+        callbackScope: gameScene,
+        loop: true
+    });
+
+    gameScene.physics.add.overlap(ball, enemies, hitEnemy);
 }
 
 function update() {
@@ -178,22 +194,46 @@ function update() {
         }
     }
 
-    if (!gameStarted) {
-        ball.setPosition(paddle.x, paddle.y - (paddle.displayHeight / 2) - (ball.body.height / 2));
+    // if (isGameplayActive && ball.body) {
+    //     gameScene.add.particles(ball.body.center.x, ball.body.center.y, 'pixel', {
+    //         // Конфигурация для ОДНОЙ частицы
+    //         speed: 0,
+    //         scale: { start: 20, end: 0 },
+    //         alpha: { start: 1, end: 0 },
+    //         lifespan: 500,
+    //         blendMode: 'ADD',
+    //         // Говорим выпустить только одну частицу и остановиться
+    //         emitting: true,
+    //         maxParticles: 1,
+    //         alignment: 'center'
+    //     });
+    // }
+
+    if (activeBonus === 'L' && aimLine && aimLine.visible) {
+        aimLine.x = paddle.x;
     }
 
-    if (ball.getData('isStuck')) {
-        // Жестко привязываем его к верху платформы, игнорируя физику
-        ball.setPosition(paddle.x, paddle.y - (paddle.displayHeight / 2) - (ball.body.height / 2));
-        ball.body.setVelocity(0,0); // На всякий случай гасим любую скорость
-    }
+    if (isGameplayActive) {
+        // Если мяч "приклеен" бонусом 'C'
+        if (ball.getData('isStuck')) {
+            ball.setPosition(paddle.x, paddle.y - (paddle.displayHeight / 2) - (ball.body.height / 2));
+            ball.body.setVelocity(0,0);
+        }
 
-    if (ball.y > gameScene.cameras.main.height) {
-        loseLife();
-    }
+        // Проверка на проигры
+        if (ball.y > gameScene.cameras.main.height) {
+            loseLife();
+        }
 
-    if (destroyableBricksCount === 0 && gameStarted) {
-        winLevel();
+        // Проверка на победу
+        if (destroyableBricksCount === 0) {
+            winLevel();
+        }
+    } else {
+        // Если геймплей не активен (например, до старта), мяч просто следует за платформой
+        if (!ball.getData('isStuck')) { // Не двигаем, если он приклеен (на случай паузы во время Catch)
+            ball.setPosition(paddle.x, paddle.y - (paddle.displayHeight / 2) - (ball.body.height / 2));
+        }
     }
 }
 
@@ -262,8 +302,7 @@ function loadLevel(level) {
 }
 
 function resetPaddleAndBall() {
-    gameStarted = false;
-    ballTrail.stop()
+    isGameplayActive = false;
     const { width, height } = gameScene.cameras.main;
     paddle.setPosition(width / 2, height - (height * PADDLE_Y_OFFSET_RATIO));
     ball.body.setVelocity(0, 0);
@@ -307,23 +346,27 @@ function generateLevel(level) {
 function hitBrick(ball, brick) {
     const willDropBonus = Math.random() < 0.2;
     const blockType = brick.getData('type');
+    const isGiant = activeBonus === 'G';
 
     if (blockType === 1) {
         destroyBrick(brick, 1, willDropBonus);
     }
     else if (blockType === 2) {
-        let health = brick.getData('health') - 1;
-        brick.setData('health', health);
-        if (health > 0) {
-            // "Ранили" блок, но не уничтожили. Все равно покажем эффект.
-            emitters.orange.emitParticleAt(brick.x, brick.y, 10); // Меньше частиц
-            brick.setTint(0xffd700);
-        } else {
-            // Уничтожаем "раненый" блок
+        // Если мяч гигантский, ломаем сразу
+        if (isGiant) {
             destroyBrick(brick, 5, willDropBonus);
+        } else {
+            let health = brick.getData('health') - 1;
+            brick.setData('health', health);
+            if (health > 0) {
+                emitters.orange.emitParticleAt(brick.x, brick.y, 10);
+                brick.setTint(0xffd700);
+            } else {
+                destroyBrick(brick, 5, willDropBonus);
+            }
         }
     }
-    else if (blockType === 3) { explodeBrick(brick); }
+    else if (blockType === 3) { explodeBrick(brick, willDropBonus); }
     else if (blockType === 4) {
         if (ball && ball.body) { ball.body.velocity.scale(1.25); }
         destroyBrick(brick, 1, willDropBonus);
@@ -362,17 +405,6 @@ function destroyBrick(brick, points = 1, dropBonus = false) {
     if (dropBonus) {
         spawnBonus(brick.x, brick.y);
     }
-}
-
-function hitBrickWithLaser(laser, brick) {
-    laser.disableBody(true, true); // Уничтожаем лазер
-    // Лазеры не могут уничтожить неразрушимые блоки
-    if (brick.getData('type') !== 9) {
-        // Мы вызываем hitBrick, чтобы повторно использовать всю логику
-        // уничтожения (очки, счетчики, бонусы). Передаем null вместо мяча.
-        hitBrick(null, brick);
-    }
-    if (brick.getData('type') !== 5) { destroyableBricksCount--; }
 }
 
 function explodeBrick(centerBrick, willDropBonus ) {
@@ -425,42 +457,102 @@ function regenerateBrick(data) {
 }
 
 function spawnBonus(x, y) {
-    const bonusTypes = ['E', 'S', 'C', 'L', 'R'];
+    const bonusColors = {
+        'E': 0x2ecc71, 'S': 0x3498db, 'C': 0xf1c40f,
+        'L': 0xe74c3c, 'R': 0x9b59b6,
+        'G': 0x1abc9c, // Бирюзовый (Giant)
+        'D': 0xff7f50, // Коралловый (Disruption)
+        'M': 0xbdc3c7, // Серебряный (Multi-ball)
+        'P': 0x27ae60, // Насыщенный зеленый (Points)
+    };
+    const bonusTypes = ['E', 'S', 'C', 'L', 'R', 'G', 'D', 'M', 'P'];
     const type = Phaser.Utils.Array.GetRandom(bonusTypes);
-
-    // --- ОТЛАДКА ---
-    console.log(`%cСПАУН: Создан бонус типа "${type}" в координатах (${Math.round(x)}, ${Math.round(y)})`, 'color: #00aaff');
+    const color = bonusColors[type];
 
     const bonusContainer = gameScene.add.container(x, y);
-    const capsule = gameScene.add.sprite(0, 0, 'pixel').setDisplaySize(50, 25).setTint(0xff00ff);
-    const letter = gameScene.add.text(0, 0, type, { fontSize: '20px', fill: '#fff', fontFamily: 'Arial' }).setOrigin(0.5);
+
+    // --- Создание капсулы (остается без изменений) ---
+    const capsuleGraphics = gameScene.make.graphics({x: -30, y: -15}); // Смещаем, чтобы центр был в (0,0)
+    capsuleGraphics.fillStyle(color, 0.8);
+    capsuleGraphics.fillRoundedRect(0, 0, 60, 30, 15);
+    const textureName = `capsule_${type}`;
+    // Проверяем, существует ли уже такая текстура, чтобы не создавать ее повторно
+    if (!gameScene.textures.exists(textureName)) {
+        capsuleGraphics.generateTexture(textureName, 60, 30);
+    }
+    capsuleGraphics.destroy();
+    const capsule = gameScene.add.sprite(0, 0, textureName);
+
+    // --- Создание буквы (остается без изменений) ---
+    const letter = gameScene.add.text(0, 0, type, {
+        fontSize: '22px', fill: '#ffffff', fontFamily: 'Arial', fontStyle: 'bold',
+        shadow: { color: '#000000', fill: true, blur: 2, offsetY: 2 }
+    }).setOrigin(0.5);
+
     bonusContainer.add([capsule, letter]);
     bonuses.add(bonusContainer);
     bonusContainer.body.velocity.y = 200;
     bonusContainer.setData('type', type);
+
+    // --- Анимация пульсации (остается без изменений) ---
+    gameScene.tweens.add({
+        targets: letter,
+        scale: 1.25,
+        duration: 500,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut'
+    });
+
+    // --- ИЗМЕНЕНИЕ: Логика шлейфа ---
+    // 1. Выбираем нужный эмиттер из нашего объекта
+    const emitter = bonusEmitters[type];
+
+    if (emitter) {
+        // 2. Привязываем его к контейнеру бонуса
+        emitter.startFollow(bonusContainer);
+        // 3. Включаем излучение
+        emitter.start();
+
+        // 4. Когда бонус уничтожается, выключаем эмиттер
+        bonusContainer.on('destroy', () => {
+            emitter.stop();
+        });
+    }
 }
 
 function collectBonus(paddle, bonus) {
     const type = bonus.getData('type');
-
-    // --- ОТЛАДКА ---
-    console.log(`%cПОДБОР: Подобран бонус типа "${type}"`, 'color: #32cd32; font-weight: bold;');
-
     bonus.destroy();
-    resetBonusEffects(); // Сначала сбрасываем старые эффекты
+    resetBonusEffects();
     activeBonus = type;
 
-    // --- ОТЛАДКА ---
-    console.log(`АКТИВАЦИЯ: activeBonus теперь равен "${activeBonus}"`);
-
     switch (type) {
-        case 'E': paddle.setDisplaySize(paddle.displayWidth * 1.5, paddle.displayHeight); break;
-        case 'S': if (ball.body.velocity.length() > 200) { ball.body.velocity.scale(0.75); } break;
-        case 'L': console.log("Эффект 'Лазер' активирован."); break;
-        case 'C': console.log("Эффект 'Прилипание' активирован."); break;
+        // ... старые бонусы ...
+        case 'L': activateLaserAim(); break;
+        case 'C': break;
         case 'R': paddle.setDisplaySize(paddle.displayWidth * 0.75, paddle.displayHeight); break;
+
+        // --- НОВЫЕ БОНУСЫ ---
+        case 'G': // Giant Ball
+            activateGiantBall(true);
+            break;
+        case 'D': // Disruption
+            disruptBall();
+            break;
+        case 'M': // Multi-ball
+            spawnLittleBalls();
+            break;
+        case 'P': // Points
+            const points = Phaser.Math.Between(100, 400);
+            updateScore(points);
+            // Этот бонус не имеет "активного" состояния, поэтому сбрасываем
+            activeBonus = null;
+            break;
     }
-    if (type === 'E' || type === 'S' || type === 'R' || type === 'L') {
+
+    // Бонус "Гигантский мяч" тоже будет временным
+    if (type === 'E' || type === 'S' || type === 'R' || type === 'G') {
         gameScene.time.delayedCall(10000, resetBonusEffects, [], gameScene);
     }
 }
@@ -478,20 +570,297 @@ function resetBonusEffects() {
         ball.body.setVelocity(Phaser.Math.Between(-width * 0.4, width * 0.4), -height * 0.8);
     }
 
+    if (activeBonus === 'G') {
+        activateGiantBall(false);
+    }
+
+    if (laserTimer) {
+        laserTimer.remove(); // Отменяем запланированный выстрел
+        laserTimer = null;
+    }
+    if (aimLine) {
+        aimLine.setVisible(false); // Прячем линию прицеливания
+    }
+
+    laserBeam = null
+    aimLine = null
     activeBonus = null;
 }
 
-function fireLaser() {
-    const laser = lasers.get(paddle.x, paddle.y - 20);
-    if (laser) {
-        laser.setActive(true);
-        laser.setVisible(true);
-        laser.setDisplaySize(5, 20).setTint(0xff0000);
-        laser.body.velocity.y = -600;
+function spawnEnemy() {
+    const { width, height } = gameScene.cameras.main;
 
-        // Лазер исчезает, когда вылетает за экран
-        laser.checkWorldBounds = true;
-        laser.outOfBoundsKill = true;
+    // 1. Определяем начальную и конечную точки
+    const sideStart = Phaser.Math.Between(0, 3); // 0-верх, 1-право, 2-низ, 3-лево
+    let xStart, yStart, xEnd, yEnd;
+
+    // Выбираем стартовую позицию за экраном
+    if (sideStart === 0) { // Сверху
+        xStart = Phaser.Math.Between(0, width); yStart = -50;
+    } else if (sideStart === 1) { // Справа
+        xStart = width + 50; yStart = Phaser.Math.Between(0, height);
+    } else if (sideStart === 2) { // Снизу
+        xStart = Phaser.Math.Between(0, width); yStart = height + 50;
+    } else { // Слева
+        xStart = -50; yStart = Phaser.Math.Between(0, height);
+    }
+
+    // Выбираем конечную позицию на противоположной стороне
+    // Чтобы траектория была интереснее, она не всегда будет строго противоположной
+    const sideEnd = (sideStart + Phaser.Math.Between(1, 3)) % 4;
+    if (sideEnd === 0) {
+        xEnd = Phaser.Math.Between(0, width); yEnd = -50;
+    } else if (sideEnd === 1) {
+        xEnd = width + 50; yEnd = Phaser.Math.Between(0, height);
+    } else if (sideEnd === 2) {
+        xEnd = Phaser.Math.Between(0, width); yEnd = height + 50;
+    } else {
+        xEnd = -50; yEnd = Phaser.Math.Between(0, height);
+    }
+
+    // 2. Создаем врага, но БЕЗ ФИЗИЧЕСКОЙ СКОРОСТИ
+    const enemy = enemies.create(xStart, yStart, 'enemy_triangle');
+    if (!enemy) return;
+
+    enemy.body.allowGravity = false;
+    // Задаем вращение, оно будет работать независимо от твина
+    enemy.body.setAngularVelocity(Phaser.Math.Between(-200, 200));
+    // Убираем отскок, т.к. твин будет управлять позицией
+    enemy.setBounce(0);
+
+    // 3. Создаем Твин для плавного движения
+    gameScene.tweens.add({
+        targets: enemy, // Цель анимации
+        x: xEnd,        // Конечная координата X
+        y: yEnd,        // Конечная координата Y
+        duration: 10000, // Длительность анимации 10 секунд
+
+        // --- КЛЮЧЕВАЯ ЧАСТЬ: ФУНКЦИЯ СГЛАЖИВАНИЯ ---
+        // 'Power2' - это квадратичная функция (плавная)
+        // 'easeInOut' - применяет ее в начале и в конце
+        ease: 'Power2',
+
+        // Функция, которая выполнится по завершении твина
+        onComplete: () => {
+            // Если враг долетел до конца и не был сбит, уничтожаем его
+            if (enemy.active) {
+                enemy.destroy();
+            }
+        }
+    });
+}
+
+// Обработка столкновения мяча с врагом
+function hitEnemy(ball, enemy) {
+    // Проверяем, что оба объекта все еще активны, чтобы избежать двойного срабатывания
+    if (!ball.active || !enemy.active) {
+        return;
+    }
+
+    const points = Phaser.Math.Between(250, 500);
+    updateScore(points);
+
+    // Используем эффект взрыва от красного блока
+    if (emitters.red) {
+        emitters.red.emitParticleAt(enemy.x, enemy.y, 30);
+    }
+
+    // Уничтожаем врага
+    enemy.destroy();
+
+    // Важно: мы НЕ трогаем мяч. Он просто летит дальше.
+}
+
+function activateLaserAim() {
+    const { height } = gameScene.cameras.main;
+
+    // Если линии нет, создаем.
+    if (!aimLine) {
+        // Создаем с альфа 0.5 для полупрозрачности
+        aimLine = gameScene.add.rectangle(0, 0, 12, height, 0xff0000, 0.5);
+    }
+
+    // "Оживляем" ее, как и лазер
+    aimLine.setPosition(paddle.x, height / 2)
+           .setAlpha(0.5) // Всегда возвращаем полупрозрачность
+           .setVisible(true)
+           .setActive(true);
+
+    // Запускаем таймер
+    laserTimer = gameScene.time.delayedCall(5000, fireMegaLaser);
+}
+
+// Фаза 2: Выстрел боевым лазером
+function fireMegaLaser() {
+    const { width, height } = gameScene.cameras.main;
+
+    // 1. Прячем линию прицеливания, она свою задачу выполнила.
+    if (aimLine) {
+        aimLine.setVisible(false);
+    }
+
+    // 2. Запоминаем позицию, где должен появиться лазер.
+    const laserX = aimLine.x;
+
+    // 3. (КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ) Если боевой лазер уже существует,
+    // сначала принудительно убиваем все анимации (твины), которые на нем висят.
+    // Это предотвращает конфликт со старой анимацией исчезновения.
+    if (laserBeam) {
+        gameScene.tweens.killTweensOf(laserBeam);
+    }
+
+    // 4. Если боевой лазер еще никогда не создавался, создаем его.
+    if (!laserBeam) {
+        laserBeam = gameScene.add.rectangle(laserX, height / 2, 20, height, 0xff0000, 1.0);
+        laserBeam.setBlendMode('ADD'); // Режим смешивания для "неонового" свечения.
+    }
+
+    // 5. "Оживляем" лазер: устанавливаем все его свойства в начальное состояние.
+    // Это гарантирует, что он будет работать каждый раз, а не только в первый.
+    laserBeam.setPosition(laserX, height / 2) // Ставим в нужную позицию.
+             .setAlpha(1)                   // Делаем полностью непрозрачным.
+             .setVisible(true);             // Делаем видимым.
+
+    // 6. Механика уничтожения объектов под лазером.
+    // Создаем невидимую физическую зону по размеру лазера.
+    const zone = gameScene.add.zone(laserX, height / 2, 20, height);
+    gameScene.physics.world.enable(zone);
+    zone.body.setAllowGravity(false);
+
+    // Получаем массив всех физических тел, которые пересекаются с этой зоной.
+    const overlappingObjects = gameScene.physics.overlapRect(laserX - 10, 0, 20, height, true, true);
+
+    overlappingObjects.forEach(body => {
+        const gameObject = body.gameObject;
+
+        // Проверяем, что объект существует и активен.
+        if (!gameObject || !gameObject.active) {
+            return;
+        }
+
+        // Если это блок (включая неразрушимые).
+        if (bricks.contains(gameObject)) {
+            if (emitters.red) emitters.red.emitParticleAt(gameObject.x, gameObject.y, 15);
+            // Если блок был разрушаемым, вычитаем его из счетчика.
+            if (gameObject.getData('type') < 9) {
+                destroyableBricksCount--;
+            }
+            gameObject.disableBody(true, true);
+        }
+
+        // Если это враг.
+        if (enemies.contains(gameObject)) {
+            hitEnemy(null, gameObject); // Используем существующую функцию для убийства врагов.
+        }
+    });
+
+    zone.destroy(); // Удаляем временную зону после проверки.
+
+    // 7. Фаза исчезновения: запускаем новую анимацию (твин).
+    gameScene.tweens.add({
+        targets: laserBeam,
+        alpha: 0,           // Целевое значение прозрачности.
+        duration: 500,      // Длительность анимации в мс.
+        delay: 200,         // Задержка перед началом анимации (лазер виден 0.2 сек).
+        onComplete: () => {
+            // Когда анимация завершена, делаем лазер невидимым
+            // и сбрасываем состояние бонуса.
+            if (laserBeam) {
+                laserBeam.setVisible(false);
+            }
+            resetBonusEffects();
+        }
+    });
+}
+
+function activateGiantBall(isActive) {
+    const { height } = gameScene.cameras.main;
+
+    if (isActive) {
+        // --- 1. Рассчитываем новый диаметр ---
+        const giantDiameter = height * BALL_DIAMETER_RATIO * 2;
+        const textureName = 'giantBallTexture';
+
+        // --- 2. Проверяем, существует ли уже текстура такого размера ---
+        // Это оптимизация, чтобы не создавать текстуру каждый раз
+        if (!gameScene.textures.exists(textureName)) {
+            const ballGraphics = gameScene.add.graphics();
+            // Рисуем новый, большой круг
+            ballGraphics.fillStyle(0xffffff); // Рисуем белым, цвет зададим через tint
+            ballGraphics.fillCircle(giantDiameter / 2, giantDiameter / 2, giantDiameter / 2);
+            ballGraphics.generateTexture(textureName, giantDiameter, giantDiameter);
+            ballGraphics.destroy();
+        }
+
+        // --- 3. Применяем новую текстуру и сбрасываем размер ---
+        // setDisplaySize(giantDiameter, giantDiameter) больше не нужен,
+        // так как текстура уже имеет правильный размер.
+        ball.setTexture(textureName);
+        ball.setCircle(giantDiameter / 2); // Физика теперь будет идеальной
+        ball.setTint(0xadff2f); // Окрашиваем в зеленоватый
+
+    } else {
+        // --- Возвращаем старую текстуру ---
+        const normalDiameter = height * BALL_DIAMETER_RATIO;
+        // ballDynamicTexture была создана в create() и имеет правильный размер
+        ball.setTexture('ballDynamicTexture');
+        ball.setCircle(normalDiameter / 2);
+        ball.setTint(0xffffff);
+    }
+}
+
+// Создает два клона основного мяча
+function disruptBall() {
+    // Эта функция очень сложна для реализации с одним мячом.
+    // Проще всего симулировать это, создав 2 маленьких шарика, как в M.
+    // Для полноценного "Disruption" нужна была бы группа для основных мячей.
+    // Пока сделаем так:
+    spawnLittleBalls(2);
+    console.warn("Бонус 'Disruption' симулирован как 'Multi-ball' с 2 шарами. Для полноценной реализации нужна группа основных мячей.");
+}
+
+// Создает 5 маленьких шариков
+function spawnLittleBalls(count = 5) {
+    for (let i = 0; i < count; i++) {
+        // --- ИЗМЕНЕНИЕ: Используем новую текстуру ---
+        const littleBall = littleBalls.create(paddle.x, paddle.y - 20, 'littleBallTexture');
+
+        if (littleBall) {
+            // --- ИЗМЕНЕНИЕ: setDisplaySize и setTint больше не нужны ---
+            // Текстура уже имеет правильный размер и цвет.
+            littleBall.setCircle(5); // Радиус физического тела = радиусу текстуры
+            littleBall.setBounce(1).setCollideWorldBounds(true);
+            littleBall.body.allowGravity = false;
+
+            const angle = Phaser.Math.Between(-150, -30);
+            gameScene.physics.velocityFromAngle(angle, 400, littleBall.body.velocity);
+
+            littleBall.setData('hitsLeft', 3);
+        }
+    }
+}
+
+// Обработчик столкновения маленького шарика с блоком
+function hitBrickWithLittleBall(littleBall, brick) {
+    let hits = littleBall.getData('hitsLeft') - 1;
+    littleBall.setData('hitsLeft', hits);
+
+    // Уничтожаем обычный блок
+    if (brick.getData('type') === 1) {
+        destroyBrick(brick);
+    }
+    // Прочный блок тоже уничтожаем с 1 удара
+    else if (brick.getData('type') === 2) {
+        destroyBrick(brick, 5);
+    }
+    // Другие блоки (взрывные и т.д.) тоже активируем
+    else {
+        hitBrick(null, brick);
+    }
+
+    // Если у шарика кончились "удары", уничтожаем его
+    if (hits <= 0) {
+        littleBall.destroy();
     }
 }
 
@@ -508,33 +877,34 @@ function loseLife() {
 }
 
 function gameOver() {
-    alert(`Игра окончена! Ваш итоговый счет: ${gameState.score}`);
-    gameState.level = 1;
-    gameState.score = 0;
-    gameState.lives = 3;
     gameStarted = false;
-    ballTrail.stop()
-    gameScene.scene.restart();
+    ball.body.stop()
+
+    const onConfirm = () => {
+        gameState.level = 1;
+        gameState.score = 0;
+        gameState.lives = 3;
+        gameScene.scene.restart();
+    };
+
+    showModal('Игра окончена!', `Ваш итоговый счет: ${gameState.score}`, onConfirm);
 }
 
 function winLevel() {
-    alert(`Уровень ${gameState.level} пройден!`);
-    gameState.level++;
-    gameState.lives = 3;
-    gameStarted = false;
-    ballTrail.stop();
-    gameScene.scene.restart();
+    isGameplayActive = false;
+    ball.body.stop();
+
+    const onConfirm = () => {
+        gameState.level++;
+        gameState.lives = 3;
+        gameScene.scene.restart();
+    };
+
+    showModal('Уровень пройден!', `Отлично! Готовы к уровню ${gameState.level + 1}?`, onConfirm);
 }
 
 function hitPaddle(ball, paddle) {
-    // --- ОТЛАДКА ---
-    if (activeBonus) {
-        console.log(`СТОЛКНОВЕНИЕ С ПЛАТФОРМОЙ: Мяч ударился о платформу. Активный бонус: "${activeBonus}"`);
-    }
-
     if (activeBonus === 'C' && !ball.getData('isStuck')) {
-        // --- ОТЛАДКА ---
-        console.log(`%cЛОВУШКА: Сработал бонус 'Catch'. Приклеиваем мяч.`, 'background: #ffdd00; color: #000;');
         ball.setData('isStuck', true);
         ball.body.setBounce(0);
         return;
@@ -577,6 +947,40 @@ function updateUI() {
     livesText.setText(`Жизни: ${gameState.lives}`);
 }
 
+/**
+ * Показывает кастомное модальное окно.
+ * @param {string} title - Заголовок окна.
+ * @param {string} text - Основной текст сообщения.
+ * @param {function} onConfirm - Функция, которая выполнится при нажатии на кнопку.
+ */
+function showModal(title, text, onConfirm) {
+    // Находим HTML элементы
+    const modal = document.getElementById('custom-modal');
+    const modalTitle = document.getElementById('modal-title');
+    const modalText = document.getElementById('modal-text');
+    const modalButton = document.getElementById('modal-button');
+
+    // Заполняем текстом
+    modalTitle.textContent = title;
+    modalText.textContent = text;
+
+    // Показываем окно
+    modal.classList.add('visible');
+
+    const confirmHandler = () => {
+        modal.classList.remove('visible');
+
+        // Выполняем переданное действие (например, перезапуск сцены)
+        if (onConfirm) {
+            onConfirm();
+        }
+
+        // Удаляем обработчик, чтобы он не сработал снова
+        modalButton.removeEventListener('click', confirmHandler);
+    };
+
+    modalButton.addEventListener('click', confirmHandler);
+}
 
 // 3. Конфигурация игры
 const config = {
