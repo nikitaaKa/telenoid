@@ -4,7 +4,7 @@ class GameScene extends Phaser.Scene {
         this.PADDLE_ASPECT_RATIO = 5.0;
         this.BRICK_ASPECT_RATIO = 2.0;
         this.PADDLE_HEIGHT_RATIO = 0.025;
-        this.PADDLE_Y_OFFSET_RATIO = 0.5;
+        this.PADDLE_Y_OFFSET_RATIO = 0.2;
         this.BALL_DIAMETER_RATIO = 0.03;
         this.BRICK_ROWS = 5;
         this.BRICKS_PER_ROW = 10;
@@ -672,7 +672,7 @@ class GameScene extends Phaser.Scene {
             'L': 0xe74c3c, 'R': 0x9b59b6,
             'G': 0x1abc9c, // Бирюзовый (Giant)
             'D': 0xff7f50, // Коралловый (Disruption)
-            'M': 0xbdc3c7, // Серебряный (Multi-ball)
+            : 0xbdc3c7, // Серебряный (Multi-ball)
             'P': 0x27ae60, // Насыщенный зеленый (Points)
         };
         const bonusTypes = ['E', 'S', 'C', 'R', 'G', 'D', 'M', 'P']; // 'L' убрал патамушта лень
@@ -1066,7 +1066,7 @@ class GameScene extends Phaser.Scene {
     }
 
     // Создает 5 маленьких шариков
-    spawnLittleBalls(count = 999) {
+    spawnLittleBalls(count = 5) {
         for (let i = 0; i < count; i++) {
             // --- ИЗМЕНЕНИЕ: Используем новую текстуру ---
             const littleBall = this.littleBalls.create(this.paddle.x, this.paddle.y - 20, 'littleBallTexture');
