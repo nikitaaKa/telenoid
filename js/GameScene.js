@@ -672,7 +672,7 @@ class GameScene extends Phaser.Scene {
             'L': 0xe74c3c, 'R': 0x9b59b6,
             'G': 0x1abc9c, // Бирюзовый (Giant)
             'D': 0xff7f50, // Коралловый (Disruption)
-            : 0xbdc3c7, // Серебряный (Multi-ball)
+            'M': 0xbdc3c7, // Серебряный (Multi-ball)
             'P': 0x27ae60, // Насыщенный зеленый (Points)
         };
         const bonusTypes = ['E', 'S', 'C', 'R', 'G', 'D', 'M', 'P']; // 'L' убрал патамушта лень
