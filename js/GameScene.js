@@ -4,7 +4,7 @@ class GameScene extends Phaser.Scene {
         this.PADDLE_ASPECT_RATIO = 5.0;
         this.BRICK_ASPECT_RATIO = 2.0;
         this.PADDLE_HEIGHT_RATIO = 0.025;
-        this.PADDLE_Y_OFFSET_RATIO = 0.1;
+        this.PADDLE_Y_OFFSET_RATIO = 0.5;
         this.BALL_DIAMETER_RATIO = 0.03;
         this.BRICK_ROWS = 5;
         this.BRICKS_PER_ROW = 10;
